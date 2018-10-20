@@ -1,0 +1,67 @@
+{
+    "child": {
+        "child1": {
+            "child1": {
+                "directory": "\/home\/robert\/OneDrive\/IIT\/7-f2018\/CS550\/PA2\/src",
+                "height": 252,
+                "profile": "2b7c4080-0ddd-46c5-8f23-563fd3ba789d",
+                "readOnly": false,
+                "synchronizedInput": true,
+                "type": "Terminal",
+                "uuid": "bfd92bf7-b4a6-4a3d-99ab-13fdbe10fce7",
+                "width": 1920
+            },
+            "child2": {
+                "directory": "\/home\/robert\/OneDrive\/IIT\/7-f2018\/CS550\/PA2\/src",
+                "height": 250,
+                "profile": "2b7c4080-0ddd-46c5-8f23-563fd3ba789d",
+                "readOnly": false,
+                "synchronizedInput": true,
+                "type": "Terminal",
+                "uuid": "a056e92c-f423-404c-9185-7443a7c2b703",
+                "width": 1920
+            },
+            "orientation": 1,
+            "position": 25,
+            "ratio": 0.5,
+            "type": "Paned"
+        },
+        "child2": {
+            "child1": {
+                "directory": "\/home\/robert\/OneDrive\/IIT\/7-f2018\/CS550\/PA2\/src",
+                "height": 251,
+                "profile": "2b7c4080-0ddd-46c5-8f23-563fd3ba789d",
+                "readOnly": false,
+                "synchronizedInput": true,
+                "type": "Terminal",
+                "uuid": "347cec6e-b799-4893-8fd8-ba4b3199f22c",
+                "width": 1920
+            },
+            "child2": {
+                "directory": "\/home\/robert\/OneDrive\/IIT\/7-f2018\/CS550\/PA2\/src",
+                "height": 249,
+                "profile": "2b7c4080-0ddd-46c5-8f23-563fd3ba789d",
+                "readOnly": false,
+                "synchronizedInput": true,
+                "type": "Terminal",
+                "uuid": "7c14d2d2-dd28-4e0c-a56d-18796e1e0d2b",
+                "width": 1920
+            },
+            "orientation": 1,
+            "position": 24,
+            "ratio": 0.5,
+            "type": "Paned"
+        },
+        "orientation": 1,
+        "position": 50,
+        "ratio": 0.5,
+        "type": "Paned"
+    },
+    "height": 1008,
+    "name": "${iconTitle}",
+    "synchronizedInput": false,
+    "type": "Session",
+    "uuid": "1dae54cd-51b9-4906-b7ac-99e2323e02ae",
+    "version": "1.0",
+    "width": 1920
+}

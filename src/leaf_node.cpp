@@ -32,7 +32,15 @@ int OBTN_REQ_COUNTER = 0;
 
 class LeafNode {
     private:
-        std::vector<std::pair<std::string, time_t>> _files; // vector of all files within a node's directory
+        std::vector<std::pair<std::string, time_t>> _local_files; // vector of all files within a node's directory
+        
+        struct _remote_file {
+            std::string local_name;
+            std::string origin_name;
+            int origin_node;
+            time_t version;
+        };
+        std::vector<_remote_file> _remote_files;
         std::ofstream _server_log;
         std::ofstream _client_log;
 
@@ -69,9 +77,10 @@ class LeafNode {
             char buffer[MAX_FILENAME_SIZE];
             if (recv(socket_fd, buffer, MAX_FILENAME_SIZE, 0) < 0) {
                 log(_server_log, "client unresponsive", "closing connection");
+                close(socket_fd);
                 return;
             }
-            
+
             // create full file path of node server to send
             std::ostringstream filename;
             filename << std::string(_local_files_path);
@@ -97,6 +106,20 @@ class LeafNode {
                     //send file size to node client
                     if (send(socket_fd, file_size, sizeof(file_size), 0) < 0) {
                         log(_server_log, "client unresponsive", "closing connection");
+                        close(fd);
+                        close(socket_fd);
+                        return;
+                    }
+
+                    time_t version = -1;
+                    auto it = std::find_if(_local_files.begin(), _local_files.end(), [buffer](const std::pair<std::string, time_t>
+                                                                                            &e){ return e.first == buffer; });
+                    if(it != _local_files.end())
+                        version = it->second;
+                    if (send(socket_fd, &version, sizeof(version), 0) < 0) {
+                        log(_server_log, "client unresponsive", "closing connection");
+                        close(fd);
+                        close(socket_fd);
                         return;
                     }
 
@@ -191,7 +214,7 @@ class LeafNode {
 
             while (1) {
                 std::vector<std::pair<std::string, time_t>> tmp_files = get_files();
-                for(auto&& x: _files) {
+                for(auto&& x: _local_files) {
                     char request = '1';
                     // send a deregister request if a file is no longer in the files vector (or has been modified)
                     if(!(std::find(tmp_files.begin(), tmp_files.end(), x) != tmp_files.end()))
@@ -210,7 +233,7 @@ class LeafNode {
                     }
                 }
                 // replace the old files vector with the new one
-                _files = tmp_files;
+                _local_files = tmp_files;
                 // wait 5 seconds to update files list 
                 sleep(5);
             }
@@ -253,12 +276,12 @@ class LeafNode {
         //helper function for creating the filename of a downloaded file
         std::string resolve_filename(std::string filename, std::string(node)) {
             std::ostringstream local_filename;
-            local_filename << _local_files_path;
+            local_filename << _remote_files_path;
             size_t extension_idx = filename.find_last_of('.');
             local_filename << filename.substr(0, extension_idx);
-            // add the file origin if the file already exists in the local directory
-            if ((std::find_if(_files.begin(), _files.end(), [filename](const std::pair<std::string, int>
-                                                        &element){ return element.first == filename; }) != _files.end()))
+            // add the file origin if the file already exists in the local "remote" directory
+            if ((std::find_if(_remote_files.begin(), _remote_files.end(), [filename, node](const _remote_file
+                                                        &e){ return e.local_name == filename && e.origin_node != std::stoi(node); }) != _remote_files.end()))
                 local_filename << "-origin-" << node;
             local_filename << filename.substr(extension_idx, filename.size() - extension_idx);
 
@@ -308,28 +331,44 @@ class LeafNode {
                     else if (file_size == -2)
                         std::cout << "\ncould not read file \"" << filename << "\"'s stats: no retreival performed\n" << std::endl;
                     else {
-                        // create pretty filename for outputting results to node client
-                        std::string local_filename_path = resolve_filename(filename, node);
-                        size_t filename_idx = local_filename_path.find_last_of('/');
-                        std::string local_filename = local_filename_path.substr(filename_idx+1, local_filename_path.size() - filename_idx);
-                        FILE *file = fopen(local_filename_path.c_str(), "w");
-                        if (file == NULL) {
-                            std::cout << "\nunable to create new file \"" << local_filename << "\": no retreival performed\n" << std::endl;
-                            log(_client_log, "failed file open", "ignoring file");
+                        time_t version;
+                        if (recv(socket_fd, &version, sizeof(version), 0) < 0) {
+                            std::cout << "\nunexpected connection issue: no retreival performed\n" << std::endl;
+                            log(_client_log, "node unresponsive", "ignoring request");
                         }
                         else {
-                            char buffer_[MAX_MSG_SIZE];
-                            int remaining_size = file_size;
-                            int received_size;
-                            // write blocks recieved from node server to new file
-                            while (((received_size = recv(socket_fd, buffer_, sizeof(buffer_), 0)) > 0) && (remaining_size > 0)) {
-                                fwrite(buffer_, sizeof(char), received_size, file);
-                                remaining_size -= received_size;
+                            // create pretty filename for outputting results to node client
+                            std::string local_filename_path = resolve_filename(filename, node);
+                            size_t filename_idx = local_filename_path.find_last_of('/');
+                            std::string local_filename = local_filename_path.substr(filename_idx+1, local_filename_path.size() - filename_idx);
+                            FILE *file = fopen(local_filename_path.c_str(), "w");
+                            if (file == NULL) {
+                                std::cout << "\nunable to create new file \"" << local_filename << "\": no retreival performed\n" << std::endl;
+                                log(_client_log, "failed file open", "ignoring file");
                             }
-                            fclose(file);
-                            std::cout << "\nfile \"" << filename << "\" downloaded as \"" << local_filename << "\"\n" << std::endl;
-                            std::cout << "\ndislpay file '" << local_filename << "'\n. . .\n" << std::endl;
-                            log(_client_log, "file download", "file download successful");
+                            else {
+                                char buffer_[MAX_MSG_SIZE];
+                                int remaining_size = file_size;
+                                int received_size;
+                                // write blocks recieved from node server to new file
+                                while (((received_size = recv(socket_fd, buffer_, sizeof(buffer_), 0)) > 0) && (remaining_size > 0)) {
+                                    fwrite(buffer_, sizeof(char), received_size, file);
+                                    remaining_size -= received_size;
+                                }
+                                fclose(file);
+                                auto it = std::find_if(_remote_files.begin(), _remote_files.end(), [filename, node](const _remote_file
+                                                            &e){ return e.origin_name == filename && e.origin_node == std::stoi(node); });
+                                if(it == _remote_files.end()) {
+                                    _remote_files.push_back({local_filename, filename, std::stoi(node), version});
+                                    std::cout << "\nfile \"" << filename << "\" downloaded as \"" << local_filename << "\"\n" << std::endl;
+                                }
+                                else {
+                                    it->version = version;
+                                    std::cout << "\nfile \"" << local_filename << "\" updated to version " << version << "\n" << std::endl;
+                                }
+                                std::cout << "\ndislpay file '" << local_filename << "'\n. . .\n" << std::endl;
+                                log(_client_log, "file download", "file download successful");
+                            }
                         }
                     }
                 }
@@ -390,7 +429,7 @@ class LeafNode {
                 directory += '/';
             _local_files_path = directory + "local/";
             _remote_files_path = directory + "remote/";
-            _files = get_files();
+            _local_files = get_files();
 
             struct sockaddr_in addr;
             socklen_t addr_size = sizeof(addr);

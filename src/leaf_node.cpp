@@ -23,6 +23,8 @@
 #define MAX_STAT_MSG_SIZE 16
 
 
+enum CONSISTENCY_METHODS{PUSH, PULL};
+
 //global counters used only for logging special messages used for later anlaysis
 int SRCH_REQ_COUNTER = 0;
 int OBTN_REQ_COUNTER = 0;
@@ -72,7 +74,7 @@ class LeafNode {
             
             // create full file path of node server to send
             std::ostringstream filename;
-            filename << std::string(_files_path);
+            filename << std::string(_local_files_path);
             filename << std::string(buffer);
 
             int fd = open(filename.str().c_str(), O_RDONLY);
@@ -115,7 +117,7 @@ class LeafNode {
         std::vector<std::pair<std::string, time_t>> get_files() {
             std::vector<std::pair<std::string, time_t>> tmp_files;
             
-            if (auto directory = opendir(_files_path.c_str())) {
+            if (auto directory = opendir(_local_files_path.c_str())) {
                 while (auto file = readdir(directory)) {
                     //skip . and .. files and any directories
                     if (!file->d_name || strcmp(file->d_name, ".") == 0 || strcmp(file->d_name, "..") == 0 || file->d_type == DT_DIR)
@@ -123,7 +125,7 @@ class LeafNode {
                     
                     // get full file path
                     std::ostringstream file_path;
-                    file_path << _files_path;
+                    file_path << _local_files_path;
                     file_path << file->d_name;
                     
                     int fd = open(file_path.str().c_str(), O_RDONLY);
@@ -251,7 +253,7 @@ class LeafNode {
         //helper function for creating the filename of a downloaded file
         std::string resolve_filename(std::string filename, std::string(node)) {
             std::ostringstream local_filename;
-            local_filename << _files_path;
+            local_filename << _local_files_path;
             size_t extension_idx = filename.find_last_of('.');
             local_filename << filename.substr(0, extension_idx);
             // add the file origin if the file already exists in the local directory
@@ -346,6 +348,11 @@ class LeafNode {
             int port;
             int peer_id;
 
+            config >> _consistency_method;
+            if (_consistency_method == PULL) {
+                config >> _ttr;
+            }
+
             // proper config syntax is expected to be followed
             config >> ttl;
             std::string tmp;
@@ -365,20 +372,24 @@ class LeafNode {
         }
 
     public:
-        std::string _files_path;
+        std::string _local_files_path;
+        std::string _remote_files_path;
         int _id;
         int _port;
         int _peer_id;
         int _socket_fd;
+        int _consistency_method;
+        int _ttr;
 
-        LeafNode(int id, std::string config_path, std::string files_path) {
+        LeafNode(int id, std::string config_path, std::string directory) {
             _id = id;
             get_network(config_path);
             
-            _files_path = files_path;
-            // add ending '/' if missing in path argument
-            if (_files_path.back() != '/')
-                _files_path += '/';
+            // add ending '/' if missing in directory argument
+            if (directory.back() != '/')
+                directory += '/';
+            _local_files_path = directory + "local/";
+            _remote_files_path = directory + "remote/";
             _files = get_files();
 
             struct sockaddr_in addr;
@@ -501,9 +512,9 @@ class LeafNode {
 
 
 int main(int argc, char *argv[]) {
-    // require node id, config path, & files path to be passed as arg
+    // require node id, config path, & directory to be passed as arg
     if (argc < 4) {
-        std::cerr << "usage: " << argv[0] << " id config_path files_path" << std::endl;
+        std::cerr << "usage: " << argv[0] << " id config_path directory" << std::endl;
         exit(0);
     }
 

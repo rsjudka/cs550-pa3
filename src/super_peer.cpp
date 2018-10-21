@@ -19,6 +19,9 @@
 #define MAX_MSG_SIZE 4096
 
 
+enum CONSISTENCY_METHODS{PUSH, PULL};
+
+
 class SuperPeer {
     private:
         std::vector<int> _peers;
@@ -436,6 +439,11 @@ class SuperPeer {
             std::string peers;
             std::string nodes;
 
+            config >> _consistency_method;
+            if (_consistency_method == PULL) {
+                config >> _ttr;
+            }
+
             config >> _ttl;
             std::string tmp;
             // proper config syntax is expected to be followed
@@ -474,6 +482,8 @@ class SuperPeer {
         int _id;
         int _port;
         int _socket_fd;
+        int _consistency_method;
+        int _ttr;
         int _sequence_number = 0;
 
         SuperPeer(int id, std::string config_path) {

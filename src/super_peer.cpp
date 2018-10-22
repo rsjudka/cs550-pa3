@@ -247,6 +247,30 @@ class SuperPeer {
             // remove filename from mapping if no more peers mapped to file
             if (_files_index[filename].size() == 0)
                 _files_index.erase(filename);
+
+            invalidate(id, filename);
+        }
+
+        void invalidate(int id, std::string filename) {
+            for (auto&& node : _nodes) {
+                if (node == id)
+                    continue;
+                int socket_fd = connect_server(node);
+                if (socket_fd < 0) {
+                    log("failed peer connection", "ignoring connection");
+                    continue;
+                }
+                if (send(socket_fd, "0", sizeof(char), 0) < 0)
+                    log("node unresponsive", "ignoring request");
+                else {
+                    char buffer[MAX_FILENAME_SIZE];
+                    strcpy(buffer, filename.c_str());
+                    if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                        log("peer unresponsive", "ignoring request");
+                    // also send version number
+                }
+                close(socket_fd);
+            }
         }
 
         // remove id from all files in mapping

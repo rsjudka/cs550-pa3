@@ -47,6 +47,7 @@ class LeafNode {
         std::ofstream _client_log;
 
         std::mutex _log_m;
+        std::mutex _remote_files_m;
 
         // helper function for getting the current time to microsecond-accuracy as a string
         std::string time_now() {
@@ -295,9 +296,34 @@ class LeafNode {
                 // replace the old files vector with the new one
                 _local_files = tmp_files;
 
-                _remote_files.erase(std::remove_if(_remote_files.begin(), _remote_files.end(), [](const _remote_file
-                                                &e){ return e.valid == false; }), _remote_files.end());
-
+                for (auto it = _remote_files.begin(); it < _remote_files.end();) {
+                    char request = '1';
+                    if (it->valid == false) {
+                        request = '2';
+                    }
+                    if (send(socket_fd, &request, sizeof(request), 0) < 0) {
+                        log(_client_log, "server unresponsive", "ignoring request");
+                    }
+                    else {
+                        bzero(buffer, MAX_FILENAME_SIZE);
+                        strcpy(buffer, it->origin_name.c_str());
+                        // register file with the peer
+                        if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                            log(_client_log, "server unresponsive", "ignoring request");
+                        
+                        if (request == '2') {
+                            time_t version = -1;
+                            if (send(socket_fd, &version, sizeof(version), 0) < 0)
+                                log(_client_log, "server unresponsive", "ignoring request");
+                            else {
+                                std::lock_guard<std::mutex> guard(_remote_files_m);
+                                _remote_files.erase(it);
+                            }
+                        }
+                        else
+                            it++;
+                    }
+                }
                 // wait 5 seconds to update files list 
                 sleep(5);
             }

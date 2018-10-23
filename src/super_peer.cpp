@@ -334,9 +334,10 @@ class SuperPeer {
             }
  
             remove_file_from_index(id, buffer);
-
-            invalidate_nodes(id, buffer, version);
-            invalidate_peers(id, buffer, version, ++_sequence_number, _ttl);
+            if (version != -1) {
+                invalidate_nodes(id, buffer, version);
+                invalidate_peers(id, buffer, version, ++_sequence_number, _ttl);  
+            }
         }
 
         void invalidate_nodes(int id, std::string filename, time_t version) {

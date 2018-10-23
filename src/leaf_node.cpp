@@ -97,19 +97,26 @@ class LeafNode {
         }
 
         void handle_peer_request(int socket_fd) {
-            char buffer[MAX_FILENAME_SIZE];
-            if (recv(socket_fd, buffer, sizeof(buffer), 0) < 0)
+            int id;
+            if (recv(socket_fd, &id, sizeof(id), 0) < 0)
                 log(_server_log, "peer unresponsive", "ignoring request");
             else {
-                time_t version;
-                if (recv(socket_fd, &version, sizeof(version), 0) < 0)
+                char buffer[MAX_FILENAME_SIZE];
+                if (recv(socket_fd, buffer, sizeof(buffer), 0) < 0)
                     log(_server_log, "peer unresponsive", "ignoring request");
-                else {      
-                    std::string filename_path = _remote_files_path + std::string(buffer);
-                    // TODO: check a remote files to only delete if file exists
-                    //       also gets possible renamed local files
-                    //       set valid bool to false
-                    remove(filename_path.c_str());
+                else {
+                    time_t version;
+                    if (recv(socket_fd, &version, sizeof(version), 0) < 0)
+                        log(_server_log, "peer unresponsive", "ignoring request");
+                    else {                              
+                        auto it = std::find_if(_remote_files.begin(), _remote_files.end(), [id, buffer, version](const _remote_file
+                                                &e){ return e.origin_node == id && e.origin_name == buffer && e.version != version; });
+                        if(it != _remote_files.end()) {
+                            it->valid = false;
+                            std::string filename_path = _remote_files_path + std::string(it->local_name);
+                            remove(filename_path.c_str());
+                        }
+                    }
                 }
             }
             close(socket_fd);
@@ -287,10 +294,12 @@ class LeafNode {
                 }
                 // replace the old files vector with the new one
                 _local_files = tmp_files;
+
+                _remote_files.erase(std::remove_if(_remote_files.begin(), _remote_files.end(), [](const _remote_file
+                                                &e){ return e.valid == false; }), _remote_files.end());
+
                 // wait 5 seconds to update files list 
                 sleep(5);
-
-                // TODO: remove from _remote_files if valid flag is false (then send deregistry msg)
             }
         }
         
@@ -559,11 +568,21 @@ class LeafNode {
                         // used for testing to see current message ids list
                         send(socket_fd, "5", sizeof(char), 0);
                         break;
+                    case 'r':
+                        view_remote_files();
+                        break;
                     default:
                         std::cout << "\nunexpected request\n" << std::endl;
                         break;
                 }
             }
+        }
+
+        void view_remote_files() {
+            for (auto &&x : _remote_files) {
+                std::cout << x.local_name << "..." << x.origin_name << "..." << x.origin_node << "..." << x.valid << "..." << x.version << std::endl;
+            }
+            std::cout << std::endl;
         }
 
         void run_server() {

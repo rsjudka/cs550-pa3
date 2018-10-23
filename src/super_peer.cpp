@@ -351,12 +351,18 @@ class SuperPeer {
                 if (send(socket_fd, "0", sizeof(char), 0) < 0)
                     log("node unresponsive", "ignoring request");
                 else {
-                    char buffer[MAX_FILENAME_SIZE];
-                    strcpy(buffer, filename.c_str());
-                    if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                    if (send(socket_fd, &id, sizeof(id), 0) < 0)
                         log("peer unresponsive", "ignoring request");
-                    if (send(socket_fd, &version, sizeof(version), 0) < 0)
-                        log("peer unresponsive", "ignoring request");
+                    else {
+                        char buffer[MAX_FILENAME_SIZE];
+                        strcpy(buffer, filename.c_str());
+                        if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                            log("peer unresponsive", "ignoring request");
+                        else {
+                            if (send(socket_fd, &version, sizeof(version), 0) < 0)
+                                log("peer unresponsive", "ignoring request");
+                        }
+                    }
                 }
                 close(socket_fd);
             }

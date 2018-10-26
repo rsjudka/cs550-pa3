@@ -77,15 +77,15 @@ class LeafNode {
 
         // handle all requests sent to the peer
         void handle_connection(int socket_fd) {
-            char id;
+            char request;
             //initialize connection by getting id
-            if (recv(socket_fd, &id, sizeof(id), 0) < 0) {
+            if (recv(socket_fd, &request, sizeof(request), 0) < 0) {
                 log(_server_log, "conn unidentified", "closing connection");
                 close(socket_fd);
                 return;
             }
 
-            switch (id) {
+            switch (request) {
                 case '0':
                     handle_peer_request(socket_fd);
                     break;
@@ -229,7 +229,22 @@ class LeafNode {
         }
 
         void handle_poll_request(int socket_fd) {
-
+            char buffer[MAX_FILENAME_SIZE];
+            if (recv(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                log(_server_log, "node unresponsive", "ignoring request");
+            else {
+                time_t version;
+                if (recv(socket_fd, &version, sizeof(version), 0) < 0)
+                    log(_server_log, "node unresponsive", "ignoring request");
+                else {
+                    std::pair<std::string, time_t> file_info = {buffer, version};
+                    bool valid = std::find(_local_files.begin(), _local_files.end(), file_info) != _local_files.end();
+                    if (send(socket_fd, &valid, sizeof(valid), 0) < 0) {
+                        log(_server_log, "node unresponsive", "ignoring request"); 
+                    }
+                }
+            }
+            close(socket_fd);
         }
 
         // read all files in node's directory and save to files vector
@@ -376,8 +391,40 @@ class LeafNode {
         }
 
         void poll_origin_node(_remote_file &remote_file) {
-            std::cout << "polling origin node" << std::endl;
             remote_file.check_time = std::chrono::system_clock::now();
+            int socket_fd = connect_server(remote_file.origin_node);
+            if (socket_fd < 0) {
+                log(_client_log, "failed node connection", "ignoring connection");
+                return;
+            }
+            if (send(socket_fd, "1", sizeof(char), 0) < 0)
+                log(_client_log, "node unresponsive", "ignoring request");
+            else {
+                if (send(socket_fd, "2", sizeof(char), 0) < 0)
+                    log(_client_log, "node unresponsive", "ignoring request");
+                else {
+                    char buffer[MAX_FILENAME_SIZE];
+                    strcpy(buffer, remote_file.origin_name.c_str());
+                    if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                        log(_client_log, "peer unresponsive", "ignoring request");
+                    else {
+                        if (send(socket_fd, &remote_file.version, sizeof(remote_file.version), 0) < 0)
+                            log(_client_log, "peer unresponsive", "ignoring request");
+                        else {
+                            if (recv(socket_fd, &remote_file.valid, sizeof(remote_file.valid), 0) < 0)
+                               log(_client_log, "peer unresponsive", "ignoring request");
+                            else {
+                                std::cout << "version " << remote_file.valid << std::endl;
+                                if (!remote_file.valid) {
+                                    std::string filename_path = _remote_files_path + remote_file.local_name;
+                                    remove(filename_path.c_str());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            close(socket_fd);
         }
         
         // handle user interface for sending a search request to the peer

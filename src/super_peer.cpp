@@ -334,9 +334,7 @@ class SuperPeer {
             }
  
             remove_file_from_index(id, buffer);
-            std::cout << _consistency_method << ':' << PULL << std::endl;
             if (_consistency_method == PUSH && version != -1) {
-                std::cout << "this is very wrong" << std::endl;
                 invalidate_nodes(id, buffer, version);
                 invalidate_peers(id, buffer, version, ++_sequence_number, _ttl);  
             }

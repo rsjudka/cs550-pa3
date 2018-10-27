@@ -24,7 +24,7 @@
 #define MAX_STAT_MSG_SIZE 16
 
 
-enum CONSISTENCY_METHODS{PUSH, PULL};
+enum CONSISTENCY_METHODS{PUSH, PULL_N, PULL_P};
 
 //global counters used only for logging special messages used for later anlaysis
 int SRCH_REQ_COUNTER = 0;
@@ -110,12 +110,14 @@ class LeafNode {
                     time_t version;
                     if (recv(socket_fd, &version, sizeof(version), 0) < 0)
                         log(_server_log, "peer unresponsive", "ignoring request");
-                    else {                              
-                        auto it = std::find_if(_remote_files.begin(), _remote_files.end(), [id, buffer, version](const _remote_file
-                                                &e){ return e.origin_node == id && e.origin_name == buffer && e.version != version; });
+                    else {
+                        auto it = std::find_if(_remote_files.begin(), _remote_files.end(),
+                                      [id, buffer, version](const _remote_file &e) {
+                                          return e.origin_node == id && e.origin_name == buffer && e.version != version;
+                                      });
                         if(it != _remote_files.end()) {
                             it->valid = false;
-                            std::string filename_path = _remote_files_path + std::string(it->local_name);
+                            std::string filename_path = _remote_files_path + it->local_name;
                             remove(filename_path.c_str());
                         }
                     }
@@ -153,21 +155,18 @@ class LeafNode {
             // recieve filename to download from node client
             char buffer[MAX_FILENAME_SIZE];
             if (recv(socket_fd, buffer, MAX_FILENAME_SIZE, 0) < 0) {
-                // TODO: cleanup
                 log(_server_log, "client unresponsive", "closing connection");
                 close(socket_fd);
                 return;
             }
 
             // create full file path of node server to send
-            std::ostringstream filename;
-            filename << std::string(_local_files_path);
-            filename << std::string(buffer);
+            std::string filename = _local_files_path + buffer;
 
             // TODO: first check if file in local or remote folder
             //       assume to search first in local??
 
-            int fd = open(filename.str().c_str(), O_RDONLY);
+            int fd = open(filename.c_str(), O_RDONLY);
             if (fd == -1) {
                 // send message to node client if file cannot be opened
                 if (send(socket_fd, "-1", MAX_STAT_MSG_SIZE, 0) < 0)
@@ -186,7 +185,6 @@ class LeafNode {
 
                     //send file size to node client
                     if (send(socket_fd, file_size, sizeof(file_size), 0) < 0) {
-                        // TODO: cleanup
                         log(_server_log, "client unresponsive", "closing connection");
                         close(fd);
                         close(socket_fd);
@@ -194,12 +192,13 @@ class LeafNode {
                     }
 
                     time_t version = -1;
-                    auto it = std::find_if(_local_files.begin(), _local_files.end(), [buffer](const std::pair<std::string, time_t>
-                                                                                            &e){ return e.first == buffer; });
+                    auto it = std::find_if(_local_files.begin(), _local_files.end(),
+                                  [buffer](const std::pair<std::string, time_t> &e){
+                                      return e.first == buffer;
+                                  });
                     if(it != _local_files.end())
                         version = it->second;
                     if (send(socket_fd, &version, sizeof(version), 0) < 0) {
-                        // TODO: cleanup
                         log(_server_log, "client unresponsive", "closing connection");
                         close(fd);
                         close(socket_fd);
@@ -316,10 +315,19 @@ class LeafNode {
 
             while (1) {
                 std::vector<std::pair<std::string, time_t>> tmp_files = get_files();
-                for(auto&& x: _local_files) {
+                for (auto&& x: _local_files) {
                     char request = '1';
                     // send a deregister request if a file is no longer in the files vector (or has been modified)
-                    if(!(std::find(tmp_files.begin(), tmp_files.end(), x) != tmp_files.end()))
+                    auto it = std::find_if(tmp_files.begin(), tmp_files.end(), [x](const std::pair<std::string, time_t> &e){
+                                  return e.first == x.first;
+                              });
+                    time_t version = 0;
+                    if (it != tmp_files.end()) {
+                        version = it->second;
+                        if (it->second != x.second)
+                            request = '2';
+                    }
+                    else
                         request = '2';
                     
                     // send a register request for any other files
@@ -334,7 +342,7 @@ class LeafNode {
                             log(_client_log, "server unresponsive", "ignoring request");
                         
                         if (request == '2') {
-                            if (send(socket_fd, &x.second, sizeof(x.second), 0) < 0)
+                            if (send(socket_fd, &version, sizeof(version), 0) < 0)
                                 log(_client_log, "server unresponsive", "ignoring request");
                         }
                     }
@@ -344,7 +352,7 @@ class LeafNode {
 
                 auto time_now = std::chrono::system_clock::now();
                 for (auto it = _remote_files.begin(); it < _remote_files.end();) {
-                    if (_consistency_method == PULL) {
+                    if (_consistency_method == PULL_N) {
                         if (std::chrono::duration_cast<std::chrono::seconds>(time_now - it->check_time).count() >= _ttr)
                             poll_origin_node(std::ref(*it));
                     }
@@ -383,10 +391,12 @@ class LeafNode {
 
         void poll_origin_node(_remote_file &remote_file) {
             remote_file.check_time = std::chrono::system_clock::now();
-            int socket_fd = connect_server(remote_file.origin_node);
+            int socket_fd = connect_server(remote_file.origin_node, false);
             if (socket_fd < 0) {
                 log(_client_log, "failed node connection", "ignoring connection");
-                return;
+                remote_file.valid = false;
+                std::string filename_path = _remote_files_path + remote_file.local_name;
+                remove(filename_path.c_str());
             }
             if (send(socket_fd, "1", sizeof(char), 0) < 0)
                 log(_client_log, "node unresponsive", "ignoring request");
@@ -405,7 +415,6 @@ class LeafNode {
                             if (recv(socket_fd, &remote_file.valid, sizeof(remote_file.valid), 0) < 0)
                                log(_client_log, "peer unresponsive", "ignoring request");
                             else {
-                                std::cout << "version " << remote_file.valid << std::endl;
                                 if (!remote_file.valid) {
                                     std::string filename_path = _remote_files_path + remote_file.local_name;
                                     remove(filename_path.c_str());
@@ -516,9 +525,11 @@ class LeafNode {
                             int file_size = atoi(buffer);
                             // handle message from node server
                             if (file_size == -1)
-                                std::cout << "\nnode '" << node << "' does not have file \"" << filename << "\": no retreival performed\n" << std::endl;
+                                std::cout << "\nnode '" << node << "' does not have file \""
+                                          << filename << "\": no retreival performed\n" << std::endl;
                             else if (file_size == -2)
-                                std::cout << "\ncould not read file \"" << filename << "\"'s stats: no retreival performed\n" << std::endl;
+                                std::cout << "\ncould not read file \"" << filename
+                                          << "\"'s stats: no retreival performed\n" << std::endl;
                             else {
                                 time_t version;
                                 if (recv(socket_fd, &version, sizeof(version), 0) < 0) {
@@ -529,10 +540,13 @@ class LeafNode {
                                     // create pretty filename for outputting results to node client
                                     std::string local_filename_path = resolve_filename(filename, node);
                                     size_t filename_idx = local_filename_path.find_last_of('/');
-                                    std::string local_filename = local_filename_path.substr(filename_idx+1, local_filename_path.size() - filename_idx);
+                                    std::string local_filename = local_filename_path.substr(
+                                        filename_idx + 1, local_filename_path.size() - filename_idx
+                                    );
                                     FILE *file = fopen(local_filename_path.c_str(), "w");
                                     if (file == NULL) {
-                                        std::cout << "\nunable to create new file \"" << local_filename << "\": no retreival performed\n" << std::endl;
+                                        std::cout << "\nunable to create new file \"" << local_filename
+                                                  << "\": no retreival performed\n" << std::endl;
                                         log(_client_log, "failed file open", "ignoring file");
                                     }
                                     else {
@@ -545,15 +559,19 @@ class LeafNode {
                                             remaining_size -= received_size;
                                         }
                                         fclose(file);
-                                        auto it = std::find_if(_remote_files.begin(), _remote_files.end(), [filename, node](const _remote_file
-                                                                    &e){ return e.origin_name == filename && e.origin_node == std::stoi(node); });
+                                        auto it = std::find_if(_remote_files.begin(), _remote_files.end(), [filename, node](const _remote_file &e){
+                                                      return e.origin_name == filename && e.origin_node == std::stoi(node);
+                                                  });
                                         if(it == _remote_files.end()) {
-                                            _remote_files.push_back({local_filename, filename, std::stoi(node), version, std::chrono::system_clock::now(), true});
-                                            std::cout << "\nfile \"" << filename << "\" downloaded as \"" << local_filename << "\"\n" << std::endl;
+                                            _remote_files.push_back({local_filename, filename, std::stoi(node),
+                                                                        version, std::chrono::system_clock::now(), true});
+                                            std::cout << "\nfile \"" << filename << "\" downloaded as \""
+                                                      << local_filename << "\"\n" << std::endl;
                                         }
                                         else {
                                             it->version = version;
-                                            std::cout << "\nfile \"" << local_filename << "\" updated to version " << version << "\n" << std::endl;
+                                            std::cout << "\nfile \"" << local_filename << "\" updated to version "
+                                                      << version << "\n" << std::endl;
                                         }
                                         std::cout << "\ndislpay file '" << local_filename << "'\n. . .\n" << std::endl;
                                         log(_client_log, "file download", "file download successful");
@@ -568,21 +586,17 @@ class LeafNode {
             close(socket_fd);
         }
 
-        void refresh() {
-
-        }
-
         void print_files() {
             std::cout << "\n__________LOCAL FILES__________" << std::endl;
             for (auto &&x : _local_files) {
                 std::cout << x.first << "..." << x.second << std::endl;
             }
-            std::cout << "_______________________________\n" << std::endl;
-            std::cout << "\n__________REMOTE FILES__________" << std::endl;
+            std::cout << "_______________________________" << std::endl;
+            std::cout << "__________REMOTE FILES__________" << std::endl;
             for (auto &&x : _remote_files) {
                 std::cout << x.local_name << "..." << x.origin_name << "..." << x.origin_node << "..." << x.valid << "..." << x.version << std::endl;
             }
-            std::cout << "_______________________________\n" << std::endl;
+            std::cout << "________________________________\n" << std::endl;
         }
 
         // gets the static network info for a node
@@ -596,7 +610,7 @@ class LeafNode {
             int peer_id;
 
             config >> _consistency_method;
-            if (_consistency_method == PULL) {
+            if (_consistency_method == PULL_N || _consistency_method == PULL_P) {
                 config >> _ttr;
             }
 
@@ -679,7 +693,7 @@ class LeafNode {
             //continously prompt user for request
             while (1) {
                 std::string request;
-                std::cout << "request [(s)earch|(o)btain|(q)uit]: ";
+                std::cout << "request [(s)earch|(o)btain|(r)efresh|(q)uit]: ";
                 std::cin >> request;
 
                 switch (request[0]) {
@@ -712,7 +726,7 @@ class LeafNode {
                         break;
                     case 'r':
                     case 'R':
-                        refresh();
+                        obtain_request();
                         break;
                     default:
                         std::cout << "\nunexpected request\n" << std::endl;

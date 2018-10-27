@@ -19,7 +19,7 @@
 #define MAX_MSG_SIZE 4096
 
 
-enum CONSISTENCY_METHODS{PUSH, PULL};
+enum CONSISTENCY_METHODS{PUSH, PULL_N, PULL_P};
 
 
 class SuperPeer {
@@ -28,6 +28,13 @@ class SuperPeer {
         std::vector<int> _nodes;
 
         std::unordered_map<std::string, std::vector<int>> _files_index; // mapping between a filename and any peers associated with it
+
+        struct _file {
+            std::string name;
+            int id;
+            time_t version;
+        };
+        std::vector<_file> _modified_files;
         
         struct _message_id_hash {
             size_t operator()(const std::pair<int, int>& p) const { return p.first ^ p.second; }
@@ -39,6 +46,7 @@ class SuperPeer {
         std::ofstream _server_logs;
 
         std::mutex _files_index_m;
+        std::mutex _modified_files_m;
         std::mutex _message_ids_m;
         std::mutex _log_m;
 
@@ -131,6 +139,9 @@ class SuperPeer {
                     break;
                 case '2':
                     invalidate(socket_fd);
+                    break;
+                case '3':
+                    compare(socket_fd);
                     break;
                 default:
                     log("peer unresponsive", "ignoring request");
@@ -248,6 +259,67 @@ class SuperPeer {
             log("peer disconnected", "closed connection");
         }
 
+        void compare(int socket_fd) {
+            char buffer[MAX_FILENAME_SIZE];
+            // recieve filename
+            if (recv(socket_fd, buffer, sizeof(buffer), 0) < 0) {
+                log("peer unresponsive", "ignoring request");
+                close(socket_fd);
+                return;
+            }
+
+            int id;
+            if (recv(socket_fd, &id, sizeof(id), 0) < 0) {
+                log("peer unresponsive", "ignoring request");
+                close(socket_fd);
+                return;
+            }
+
+            time_t version;
+            if (recv(socket_fd, &version, sizeof(version), 0) < 0) {
+                log("peer unresponsive", "ignoring request");
+                close(socket_fd);
+                return;
+            }
+   
+            if (_files_index.find(buffer) != _files_index.end()) {
+                compare_nodes(id, buffer, version);
+            }
+            close(socket_fd);
+            log("peer disconnected", "closed connection");
+        }
+
+        void compare_nodes(int id, std::string filename, time_t version) {
+            for (auto&& node : _nodes) {
+                if (node == id)
+                    continue;
+                if((std::find(_files_index[filename].begin(), _files_index[filename].end(), node) != _files_index[filename].end())) {
+                    int socket_fd = connect_server(node);
+                    if (socket_fd < 0) {
+                        log("failed node connection", "ignoring connection");
+                        continue;
+                    }
+                    if (send(socket_fd, "0", sizeof(char), 0) < 0)
+                        log("node unresponsive", "ignoring request");
+                    else {
+                        if (send(socket_fd, &id, sizeof(id), 0) < 0)
+                            log("node unresponsive", "ignoring request");
+                        else {
+                            char buffer[MAX_FILENAME_SIZE];
+                            strcpy(buffer, filename.c_str());
+                            if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                                log("node unresponsive", "ignoring request");
+                            else {
+                                if (send(socket_fd, &version, sizeof(version), 0) < 0)
+                                    log("node unresponsive", "ignoring request");
+                            }
+                        }
+                    }
+                    close(socket_fd);
+                }
+            } 
+        }
+
         // handle all requests sent to the indexing server
         void handle_node_request(int socket_fd) {
             int id;
@@ -334,9 +406,15 @@ class SuperPeer {
             }
  
             remove_file_from_index(id, buffer);
-            if (_consistency_method == PUSH && version != -1) {
-                invalidate_nodes(id, buffer, version);
-                invalidate_peers(id, buffer, version, ++_sequence_number, _ttl);  
+            if (version != -1) {
+                if (_consistency_method == PUSH) {
+                    invalidate_nodes(id, buffer, version);
+                    invalidate_peers(id, buffer, version, ++_sequence_number, _ttl);
+                }
+                else if (_consistency_method == PULL_P) {
+                    std::lock_guard<std::mutex> guard(_modified_files_m);
+                    _modified_files.push_back({buffer, id, version});
+                }
             }
         }
 
@@ -346,22 +424,22 @@ class SuperPeer {
                     continue;
                 int socket_fd = connect_server(node);
                 if (socket_fd < 0) {
-                    log("failed peer connection", "ignoring connection");
+                    log("failed node connection", "ignoring connection");
                     continue;
                 }
                 if (send(socket_fd, "0", sizeof(char), 0) < 0)
                     log("node unresponsive", "ignoring request");
                 else {
                     if (send(socket_fd, &id, sizeof(id), 0) < 0)
-                        log("peer unresponsive", "ignoring request");
+                        log("node unresponsive", "ignoring request");
                     else {
                         char buffer[MAX_FILENAME_SIZE];
                         strcpy(buffer, filename.c_str());
                         if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
-                            log("peer unresponsive", "ignoring request");
+                            log("node unresponsive", "ignoring request");
                         else {
                             if (send(socket_fd, &version, sizeof(version), 0) < 0)
-                                log("peer unresponsive", "ignoring request");
+                                log("node unresponsive", "ignoring request");
                         }
                     }
                 }
@@ -410,7 +488,8 @@ class SuperPeer {
                                                 log("peer unresponsive", "ignoring request");
                                             else {
                                                 std::string msg = "msg id [" + std::to_string(id) + "," +
-                                                        std::to_string(sequence_number) + "] to peer " + std::to_string(peer);
+                                                                  std::to_string(sequence_number) +
+                                                                  "] to peer " + std::to_string(peer);
                                                 log("forwarding message", msg);
                                             }
                                         }
@@ -620,7 +699,7 @@ class SuperPeer {
             std::string nodes;
 
             config >> _consistency_method;
-            if (_consistency_method == PULL) {
+            if (_consistency_method == PULL_N || _consistency_method == PULL_P) {
                 config >> _ttr;
             }
 
@@ -655,6 +734,46 @@ class SuperPeer {
                                                         itr->second).count() > 1) ? _message_ids.erase(itr++) : ++itr;
                 }
             }
+        }
+
+        void check_peers() {
+            while (1) {
+                sleep(_ttr);
+                for (auto&& x: _modified_files) {
+                    for (auto&& peer : _peers) {
+                        int socket_fd = connect_server(peer);
+                        if (socket_fd < 0) {
+                            log("failed peer connection", "ignoring connection");
+                            continue;
+                        }
+                        if (send(socket_fd, "0", sizeof(char), 0) < 0)
+                            log("peer unresponsive", "ignoring request");
+                        else {
+                            if (send(socket_fd, "3", sizeof(char), 0) < 0)
+                                log("peer unresponsive", "ignoring request");
+                            else {
+                                char buffer[MAX_FILENAME_SIZE];
+                                strcpy(buffer, x.name.c_str());
+                                // send the filename of the request
+                                if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                                    log("peer unresponsive", "ignoring request");
+                                else {
+                                    if (send(socket_fd, &x.id, sizeof(x.id), 0) < 0)
+                                        log("peer unresponsive", "ignoring request");
+                                    else {
+                                        if (send(socket_fd, &x.version, sizeof(x.version), 0) < 0)
+                                            log("peer unresponsive", "ignoring request");
+                                    }
+                                }
+                            }
+                        }
+                        close(socket_fd);
+                    }
+                }
+                std::lock_guard<std::mutex> guard(_modified_files_m);
+                _modified_files.clear();
+            }
+
         }
 
     public:
@@ -709,8 +828,14 @@ class SuperPeer {
             int socket_fd;
 
             // start thread for maintaining messages list
-            std::thread t(&SuperPeer::maintain_message_ids, this);
-            t.detach();
+            std::thread m_t(&SuperPeer::maintain_message_ids, this);
+            m_t.detach();
+
+            if (_consistency_method == PULL_P) {
+                std::thread f_t(&SuperPeer::check_peers, this);
+                f_t.detach();
+            }
+
 
             std::ostringstream connection;
             while (1) {

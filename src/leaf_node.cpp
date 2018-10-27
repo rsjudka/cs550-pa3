@@ -584,6 +584,23 @@ class LeafNode {
             close(socket_fd);
         }
 
+        void refresh() {
+
+        }
+
+        void print_files() {
+            std::cout << "\n__________LOCAL FILES__________" << std::endl;
+            for (auto &&x : _local_files) {
+                std::cout << x.first << "..." << x.second << std::endl;
+            }
+            std::cout << "_______________________________\n" << std::endl;
+            std::cout << "\n__________REMOTE FILES__________" << std::endl;
+            for (auto &&x : _remote_files) {
+                std::cout << x.local_name << "..." << x.origin_name << "..." << x.origin_node << "..." << x.valid << "..." << x.version << std::endl;
+            }
+            std::cout << "_______________________________\n" << std::endl;
+        }
+
         // gets the static network info for a node
         void get_network(std::string config_path) {
             // open a stream to the config file
@@ -705,21 +722,19 @@ class LeafNode {
                         // used for testing to see current message ids list
                         send(socket_fd, "5", sizeof(char), 0);
                         break;
+                    case 'f':
+                    case 'F':
+                        print_files();
+                        break;
                     case 'r':
-                        view_remote_files();
+                    case 'R':
+                        refresh();
                         break;
                     default:
                         std::cout << "\nunexpected request\n" << std::endl;
                         break;
                 }
             }
-        }
-
-        void view_remote_files() {
-            for (auto &&x : _remote_files) {
-                std::cout << x.local_name << "..." << x.origin_name << "..." << x.origin_node << "..." << x.valid << "..." << x.version << std::endl;
-            }
-            std::cout << std::endl;
         }
 
         void run_server() {

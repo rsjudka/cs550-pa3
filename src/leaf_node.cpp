@@ -346,9 +346,10 @@ class LeafNode {
                 for (auto&& x: _local_files) {
                     char request = '1';
                     // send a deregister request if a file is no longer in the files vector (or has been modified)
-                    auto it = std::find_if(tmp_files.begin(), tmp_files.end(), [x](const std::pair<std::string, time_t> &e){
-                                  return e.first == x.first;
-                              });
+                    auto it = std::find_if(tmp_files.begin(), tmp_files.end(),
+                                           [x](const std::pair<std::string, time_t> &e){
+                                               return e.first == x.first;
+                                           });
                     time_t version = 0;
                     if (it != tmp_files.end()) {
                         version = it->second;
@@ -604,12 +605,13 @@ class LeafNode {
                                                 remaining_size -= received_size;
                                             }
                                             fclose(file);
-                                            auto it = std::find_if(_remote_files.begin(), _remote_files.end(), [filename, id](const _remote_file &e){
-                                                        return e.origin_name == filename && e.origin_node == id;
-                                                    });
+                                            auto it = std::find_if(_remote_files.begin(), _remote_files.end(),
+                                                                   [filename, id](const _remote_file &e){
+                                                                       return e.origin_name == filename && e.origin_node == id;
+                                                                   });
                                             if(it == _remote_files.end()) {
-                                                _remote_files.push_back({local_filename, filename, id,
-                                                                            version, std::chrono::system_clock::now(), true});
+                                                _remote_files.push_back({local_filename, filename, id, version,
+                                                                        std::chrono::system_clock::now(), true});
                                                 std::cout << "\nfile \"" << filename << "\" downloaded as \""
                                                         << local_filename << "\"\n" << std::endl;
                                             }
@@ -634,13 +636,16 @@ class LeafNode {
 
         void print_files() {
             std::cout << "\n__________LOCAL FILES__________" << std::endl;
+            std::cout << "[filename] [version]" << std::endl;
             for (auto &&x : _local_files) {
-                std::cout << x.first << "..." << x.second << std::endl;
+                std::cout << '[' << x.first << "] [" << x.second << ']' << std::endl;
             }
             std::cout << "_______________________________" << std::endl;
             std::cout << "__________REMOTE FILES__________" << std::endl;
+            std::cout << "[local filename] [origin filename] [origin node] [validity] [version]" << std::endl;
             for (auto &&x : _remote_files) {
-                std::cout << x.local_name << "..." << x.origin_name << "..." << x.origin_node << "..." << x.valid << "..." << x.version << std::endl;
+                std::cout << '[' << x.local_name << "] [" << x.origin_name << "] [" << x.origin_node
+                          << "] [" << x.valid << "] [" << x.version << ']' << std::endl;
             }
             std::cout << "________________________________\n" << std::endl;
         }

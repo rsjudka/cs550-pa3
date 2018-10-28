@@ -119,6 +119,8 @@ class LeafNode {
                             it->valid = false;
                             std::string filename_path = _remote_files_path + it->local_name;
                             remove(filename_path.c_str());
+                            std::string msg = "remote file \"" + it->local_name + "\" modified";
+                            log(_client_log, "removing file", msg);
                         }
                     }
                 }
@@ -199,7 +201,7 @@ class LeafNode {
                     }
 
                     time_t version = -1;
-                    int id = _id;
+                    int id = _port;
                     if (from_remote) {
                         auto it = std::find_if(_remote_files.begin(), _remote_files.end(),
                                     [buffer](const _remote_file &e){
@@ -423,6 +425,9 @@ class LeafNode {
                 remote_file.valid = false;
                 std::string filename_path = _remote_files_path + remote_file.local_name;
                 remove(filename_path.c_str());
+                std::string msg = "remote file \"" + remote_file.local_name + "\" modified";
+                log(_client_log, "removing file", msg);
+
             }
             if (send(socket_fd, "1", sizeof(char), 0) < 0)
                 log(_client_log, "node unresponsive", "ignoring request");
@@ -444,6 +449,8 @@ class LeafNode {
                                 if (!remote_file.valid) {
                                     std::string filename_path = _remote_files_path + remote_file.local_name;
                                     remove(filename_path.c_str());
+                                    std::string msg = "remote file \"" + remote_file.local_name + "\" modified";
+                                    log(_client_log, "removing file", msg);
                                 }
                             }
                         }
@@ -488,14 +495,16 @@ class LeafNode {
         }
 
         //helper function for creating the filename of a downloaded file
-        std::string resolve_filename(std::string filename, std::string(node)) {
+        std::string resolve_filename(std::string filename, int node) {
             std::ostringstream local_filename;
             local_filename << _remote_files_path;
             size_t extension_idx = filename.find_last_of('.');
             local_filename << filename.substr(0, extension_idx);
             // add the file origin if the file already exists in the local "remote" directory
-            if ((std::find_if(_remote_files.begin(), _remote_files.end(), [filename, node](const _remote_file
-                                                        &e){ return e.local_name == filename && e.origin_node != std::stoi(node); }) != _remote_files.end()))
+            if ((std::find_if(_remote_files.begin(), _remote_files.end(),
+                              [filename, node](const _remote_file &e){
+                                  return e.local_name == filename && e.origin_node != node;
+                              }) != _remote_files.end()))
                 local_filename << "-origin-" << node;
             local_filename << filename.substr(extension_idx, filename.size() - extension_idx);
 
@@ -558,9 +567,13 @@ class LeafNode {
                                           << "\"'s stats: no retreival performed\n" << std::endl;
                             else {
                                 int id;
-                                if (recv(socket_fd, &id, sizeof(id), 0) < 0) {
-                                    std::cout << "\nunexpected connection issue: no retreival performed\n" << std::endl;
-                                    log(_client_log, "node unresponsive", "ignoring request");
+                                if (recv(socket_fd, &id, sizeof(id), 0) < 0 || id == _port) {
+                                    if (id == _port)
+                                        std::cout << "\nfile is from current client: no retreival performed\n" << std::endl;
+                                    else {
+                                        std::cout << "\nunexpected connection issue: no retreival performed\n" << std::endl;
+                                        log(_client_log, "node unresponsive", "ignoring request");
+                                    }
                                 }
                                 else {
                                     time_t version;

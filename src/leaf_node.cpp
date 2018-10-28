@@ -771,6 +771,10 @@ class LeafNode {
                         // used for testing to see current message ids list
                         send(socket_fd, "5", sizeof(char), 0);
                         break;
+                    case 'd':
+                    case 'D':
+                        send(socket_fd, "6", sizeof(char), 0);
+                        break;
                     case 'f':
                     case 'F':
                         print_files();

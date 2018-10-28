@@ -282,9 +282,8 @@ class SuperPeer {
                 return;
             }
    
-            if (_files_index.find(buffer) != _files_index.end()) {
+            if (_files_index.find(buffer) != _files_index.end())
                 compare_nodes(id, buffer, version);
-            }
             close(socket_fd);
             log("peer disconnected", "closed connection");
         }
@@ -354,6 +353,9 @@ class SuperPeer {
                         break;
                     case '5':
                         print_message_ids_list();
+                        break;
+                    case '6':
+                        print_modified_files_list();
                         break;
                     case '0':
                         remove_node(socket_fd, id, "node disconnected");
@@ -688,6 +690,14 @@ class SuperPeer {
             std::cout << "_______________________________\n" << std::endl;
         }
 
+        void print_modified_files_list() {
+            std::cout << "\n__________MODIFIED FILES__________" << std::endl;
+            std::cout << "[filename] [origin node] [version]" << std::endl;
+            for (auto &&x : _modified_files)
+                std::cout << '[' << x.name << "] [" << x.id << "] [" << x.version << ']' << std::endl;
+            std::cout << "__________________________________\n" << std::endl;
+        }
+
         // gets the static network info for a peer
         void get_network(std::string config_path) {
             // open a stream to the config file
@@ -740,7 +750,8 @@ class SuperPeer {
             while (1) {
                 sleep(_ttr);
                 for (auto&& x: _modified_files) {
-                    compare_nodes(x.id, x.name, x.version);
+                    if (_files_index.find(x.name) != _files_index.end())
+                        compare_nodes(x.id, x.name, x.version);
                     for (auto&& peer : _peers) {
                         int socket_fd = connect_server(peer);
                         if (socket_fd < 0) {

@@ -740,6 +740,7 @@ class SuperPeer {
             while (1) {
                 sleep(_ttr);
                 for (auto&& x: _modified_files) {
+                    compare_nodes(x.id, x.name, x.version);
                     for (auto&& peer : _peers) {
                         int socket_fd = connect_server(peer);
                         if (socket_fd < 0) {

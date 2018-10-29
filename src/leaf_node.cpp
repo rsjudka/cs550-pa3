@@ -24,7 +24,7 @@
 #define MAX_STAT_MSG_SIZE 16
 
 
-enum CONSISTENCY_METHODS{PUSH, PULL_N, PULL_P};
+enum CONSISTENCY_METHODS{PUSH, PULL_N, PULL_P}; // cleaner comparisons for consistency method in use
 
 //global counters used only for logging special messages used for later anlaysis
 int SRCH_REQ_COUNTER = 0;
@@ -33,17 +33,17 @@ int OBTN_REQ_COUNTER = 0;
 
 class LeafNode {
     private:
-        std::vector<std::pair<std::string, time_t>> _local_files; // vector of all files within a node's directory
+        std::vector<std::pair<std::string, time_t>> _local_files; // vector of all local files within a node's directory
         
         struct _remote_file {
-            std::string local_name;
-            std::string origin_name;
-            int origin_node;
-            time_t version;
-            std::chrono::time_point<std::chrono::system_clock> check_time;
-            bool valid;
+            std::string local_name; // name of the saved file in the current node's directory
+            std::string origin_name; // name of the file from the origin server
+            int origin_node; // the origin server's id
+            time_t version; // version number of the remote file
+            std::chrono::time_point<std::chrono::system_clock> check_time; // last time the file's consistency was checked
+            bool valid; // flag for if a file is valid (consistent) or has been removed
         };
-        std::vector<_remote_file> _remote_files;
+        std::vector<_remote_file> _remote_files; // vector of all remote files within a node's directory
         std::ofstream _server_log;
         std::ofstream _client_log;
 
@@ -74,10 +74,10 @@ class LeafNode {
             exit(1);
         }
 
-        // handle all requests sent to the peer
+        // handle all requests sent to the node
         void handle_connection(int socket_fd) {
             char request;
-            //initialize connection by getting id
+            //initialize connection by getting request type
             if (recv(socket_fd, &request, sizeof(request), 0) < 0) {
                 log(_server_log, "conn unidentified", "closing connection");
                 close(socket_fd);
@@ -98,23 +98,29 @@ class LeafNode {
             }
         }
 
+        // handle invalidation request from peer
         void handle_peer_request(int socket_fd) {
             int id;
+            // get the id of the file to compare
             if (recv(socket_fd, &id, sizeof(id), 0) < 0)
                 log(_server_log, "peer unresponsive", "ignoring request");
             else {
+                // get the filename of the file to compare
                 char buffer[MAX_FILENAME_SIZE];
                 if (recv(socket_fd, buffer, sizeof(buffer), 0) < 0)
                     log(_server_log, "peer unresponsive", "ignoring request");
                 else {
+                    // get the version of the file to compare
                     time_t version;
                     if (recv(socket_fd, &version, sizeof(version), 0) < 0)
                         log(_server_log, "peer unresponsive", "ignoring request");
                     else {
+                        // iterator to find remote file from recvd attributes
                         auto it = std::find_if(_remote_files.begin(), _remote_files.end(),
                                       [id, buffer, version](const _remote_file &e) {
                                           return e.origin_node == id && e.origin_name == buffer && e.version != version;
                                       });
+                        // mark file invalid and remove from remote files directory if the node owns the file
                         if(it != _remote_files.end()) {
                             it->valid = false;
                             std::string filename_path = _remote_files_path + it->local_name;
@@ -128,6 +134,7 @@ class LeafNode {
             close(socket_fd);
         }
 
+        // handle requests from other nodes
         void handle_node_request(int socket_fd) {
             char request;
             // get request type from node
@@ -167,8 +174,10 @@ class LeafNode {
 
             int fd = open(filename.c_str(), O_RDONLY);
             bool from_remote = false;
+            // assume if invalid fd then file does not exist in node's local files directory
             if (fd == -1) {
                 close(fd);
+                // check if file exists in node's remote files directory
                 filename = _remote_files_path + buffer;
                 fd = open(filename.c_str(), O_RDONLY);
                 from_remote = true;
@@ -200,6 +209,8 @@ class LeafNode {
                     time_t version = -1;
                     int id = _port;
                     if (from_remote) {
+                        // get file attributes for cached version of a file
+                        // assume the first name to match is the one to download
                         auto it = std::find_if(_remote_files.begin(), _remote_files.end(),
                                     [buffer](const _remote_file &e){
                                         return e.origin_name == buffer;
@@ -210,6 +221,7 @@ class LeafNode {
                         }
                     }
                     else {
+                        // get version of file stored in local files directory
                         auto it = std::find_if(_local_files.begin(), _local_files.end(),
                                     [buffer](const std::pair<std::string, time_t> &e){
                                         return e.first == buffer;
@@ -217,12 +229,15 @@ class LeafNode {
                         if(it != _local_files.end())
                             version = it->second;
                     }
+                    
+                    // send origin node of file
                     if (send(socket_fd, &id, sizeof(id), 0) < 0) {
                         log(_server_log, "client unresponsive", "closing connection");
                         close(fd);
                         close(socket_fd);
                         return;
                     }
+                    // send version of file
                     if (send(socket_fd, &version, sizeof(version), 0) < 0) {
                         log(_server_log, "client unresponsive", "closing connection");
                         close(fd);
@@ -243,16 +258,20 @@ class LeafNode {
             log(_server_log, "client disconnected", "closed connection");
         }
 
+        // check other node's cached file with local version of file
         void handle_poll_request(int socket_fd) {
+            // get filename of file to check
             char buffer[MAX_FILENAME_SIZE];
             if (recv(socket_fd, buffer, sizeof(buffer), 0) < 0)
                 log(_server_log, "node unresponsive", "ignoring request");
             else {
+                // get version of file to check
                 time_t version;
                 if (recv(socket_fd, &version, sizeof(version), 0) < 0)
                     log(_server_log, "node unresponsive", "ignoring request");
                 else {
                     std::pair<std::string, time_t> file_info = {buffer, version};
+                    // send validity of file (based on if file exists in local directory and the version matches)
                     bool valid = std::find(_local_files.begin(), _local_files.end(), file_info) != _local_files.end();
                     if (send(socket_fd, &valid, sizeof(valid), 0) < 0) {
                         log(_server_log, "node unresponsive", "ignoring request"); 
@@ -339,10 +358,11 @@ class LeafNode {
             char buffer[MAX_FILENAME_SIZE];
 
             while (1) {
+                // reigister files from local files directory
                 std::vector<std::pair<std::string, time_t>> tmp_files = get_files();
                 for (auto&& x: _local_files) {
                     char request = '1';
-                    // send a deregister request if a file is no longer in the files vector (or has been modified)
+                    // check if a file is no longer in the files vector (or has been modified)
                     auto it = std::find_if(tmp_files.begin(), tmp_files.end(),
                                            [x](const std::pair<std::string, time_t> &e){
                                                return e.first == x.first;
@@ -350,13 +370,14 @@ class LeafNode {
                     time_t version = 0;
                     if (it != tmp_files.end()) {
                         version = it->second;
+                        // check if version matches current file version
                         if (it->second != x.second)
                             request = '2';
                     }
                     else
                         request = '2';
                     
-                    // send a register request for any other files
+                    // send the registry type for the file
                     if (send(socket_fd, &request, sizeof(request), 0) < 0) {
                         log(_client_log, "server unresponsive", "ignoring request");
                     }
@@ -368,6 +389,7 @@ class LeafNode {
                             log(_client_log, "server unresponsive", "ignoring request");
                         
                         if (request == '2') {
+                            // send version of file to invalidate
                             if (send(socket_fd, &version, sizeof(version), 0) < 0)
                                 log(_client_log, "server unresponsive", "ignoring request");
                         }
@@ -376,17 +398,22 @@ class LeafNode {
                 // replace the old files vector with the new one
                 _local_files = tmp_files;
 
+                // reigster files from remote files directory
                 auto time_now = std::chrono::system_clock::now();
                 for (auto it = _remote_files.begin(); it < _remote_files.end();) {
+                    // check time since last poll when using PULL FROM NODE consistency method
                     if (_consistency_method == PULL_N) {
                         if (std::chrono::duration_cast<std::chrono::seconds>(time_now - it->check_time).count() >= _ttr)
                             poll_origin_node(std::ref(*it));
                     }
 
+                    // send dereigstry request if file has been marked invalid
                     char request = '1';
                     if (it->valid == false) {
                         request = '2';
                     }
+
+                    // send registration type
                     if (send(socket_fd, &request, sizeof(request), 0) < 0) {
                         log(_client_log, "server unresponsive", "ignoring request");
                     }
@@ -398,6 +425,8 @@ class LeafNode {
                             log(_client_log, "server unresponsive", "ignoring request");
                         
                         if (request == '2') {
+                            // send version for deregistry
+                            // -1 used as special value to tell super peer that this file is not from the origin server
                             time_t version = -1;
                             if (send(socket_fd, &version, sizeof(version), 0) < 0)
                                 log(_client_log, "server unresponsive", "ignoring request");
@@ -415,9 +444,11 @@ class LeafNode {
             }
         }
 
+        // polls the origin node for a remote file to see if the cached version is valid
         void poll_origin_node(_remote_file &remote_file) {
             remote_file.check_time = std::chrono::system_clock::now();
             int socket_fd = connect_server(remote_file.origin_node, false);
+            // remove file from remote files if origin node cannot be reached
             if (socket_fd < 0) {
                 log(_client_log, "failed node connection", "ignoring connection");
                 remote_file.valid = false;
@@ -433,17 +464,21 @@ class LeafNode {
                 if (send(socket_fd, "2", sizeof(char), 0) < 0)
                     log(_client_log, "node unresponsive", "ignoring request");
                 else {
+                    // send filename of file to compare
                     char buffer[MAX_FILENAME_SIZE];
                     strcpy(buffer, remote_file.origin_name.c_str());
                     if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
                         log(_client_log, "peer unresponsive", "ignoring request");
                     else {
+                        // send version of file to compare
                         if (send(socket_fd, &remote_file.version, sizeof(remote_file.version), 0) < 0)
                             log(_client_log, "peer unresponsive", "ignoring request");
                         else {
+                            // set valid flag based on response from origin node
                             if (recv(socket_fd, &remote_file.valid, sizeof(remote_file.valid), 0) < 0)
                                log(_client_log, "peer unresponsive", "ignoring request");
                             else {
+                                // remove file if it is no longer valid
                                 if (!remote_file.valid) {
                                     std::string filename_path = _remote_files_path + remote_file.local_name;
                                     remove(filename_path.c_str());
@@ -564,6 +599,7 @@ class LeafNode {
                                 std::cout << "\ncould not read file \"" << filename
                                           << "\"'s stats: no retreival performed\n" << std::endl;
                             else {
+                                // get origin node of downloaded file
                                 int id;
                                 if (recv(socket_fd, &id, sizeof(id), 0) < 0 || id == _port) {
                                     if (id == _port)
@@ -574,6 +610,7 @@ class LeafNode {
                                     }
                                 }
                                 else {
+                                    // get version of dowloaded file
                                     time_t version;
                                     if (recv(socket_fd, &version, sizeof(version), 0) < 0) {
                                         std::cout << "\nunexpected connection issue: no retreival performed\n" << std::endl;
@@ -606,6 +643,7 @@ class LeafNode {
                                                                    [filename, id](const _remote_file &e){
                                                                        return e.origin_name == filename && e.origin_node == id;
                                                                    });
+                                            // adds new file to remote files list if it doesnt exist
                                             if(it == _remote_files.end()) {
                                                 _remote_files.push_back({local_filename, filename, id, version,
                                                                         std::chrono::system_clock::now(), true});
@@ -613,6 +651,7 @@ class LeafNode {
                                                         << local_filename << "\"\n" << std::endl;
                                             }
                                             else {
+                                                // updates file if it already exists and prints new version to user
                                                 it->version = version;
                                                 std::cout << "\nfile \"" << local_filename << "\" updated to version "
                                                         << version << "\n" << std::endl;
@@ -770,6 +809,7 @@ class LeafNode {
                         break;
                     case 'd':
                     case 'D':
+                        // used for testing to see current modified files list
                         send(socket_fd, "6", sizeof(char), 0);
                         break;
                     case 'f':

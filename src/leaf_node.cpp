@@ -165,9 +165,6 @@ class LeafNode {
             // create full file path of node server to send
             std::string filename = _local_files_path + buffer;
 
-            // TODO: first check if file in local or remote folder
-            //       assume to search first in local??
-
             int fd = open(filename.c_str(), O_RDONLY);
             bool from_remote = false;
             if (fd == -1) {

@@ -260,16 +260,34 @@ class SuperPeer {
         }
 
         void compare(int socket_fd) {
-            char buffer[MAX_FILENAME_SIZE];
-            // recieve filename
-            if (recv(socket_fd, buffer, sizeof(buffer), 0) < 0) {
+            // get the ttl value of the sent message
+            int ttl;
+            if (recv(socket_fd, &ttl, sizeof(ttl), 0) < 0) {
                 log("peer unresponsive", "ignoring request");
                 close(socket_fd);
                 return;
             }
 
+            // get the id part of the message id
             int id;
             if (recv(socket_fd, &id, sizeof(id), 0) < 0) {
+                log("peer unresponsive", "ignoring request");
+                close(socket_fd);
+                return;
+            }
+
+            // get the sequence message part of the message id
+            int sequence_number;
+            if (recv(socket_fd, &sequence_number, sizeof(sequence_number), 0) < 0) {
+                log("peer unresponsive", "ignoring request");
+                close(socket_fd);
+                return;
+            }            
+
+
+            char buffer[MAX_FILENAME_SIZE];
+            // recieve filename
+            if (recv(socket_fd, buffer, sizeof(buffer), 0) < 0) {
                 log("peer unresponsive", "ignoring request");
                 close(socket_fd);
                 return;
@@ -281,9 +299,14 @@ class SuperPeer {
                 close(socket_fd);
                 return;
             }
-   
-            if (_files_index.find(buffer) != _files_index.end())
-                compare_nodes(id, buffer, version);
+
+            if (check_message_id(socket_fd)) {
+                if (_files_index.find(buffer) != _files_index.end())
+                    compare_nodes(id, buffer, version);
+                if (ttl-- > 0) {
+                    compare_peers(buffer, id, sequence_number, ttl, version);
+                }
+            }
             close(socket_fd);
             log("peer disconnected", "closed connection");
         }
@@ -597,6 +620,60 @@ class SuperPeer {
             return ids;
         }
 
+        void compare_peers(std::string filename, int id, int sequence_number, int ttl, time_t version) {
+            for (auto&& peer : _peers) {
+                int socket_fd = connect_server(peer);
+                if (socket_fd < 0) {
+                    log("failed peer connection", "ignoring connection");
+                    continue;
+                }
+                if (send(socket_fd, "0", sizeof(char), 0) < 0)
+                    log("peer unresponsive", "ignoring request");
+                else {
+                    // send ttl value of current message
+                    if (send(socket_fd, "3", sizeof(char), 0) < 0)
+                        log("peer unresponsive", "ignoring request");
+                    else {
+                        // send ttl value of current message
+                        if (send(socket_fd, &ttl, sizeof(ttl), 0) < 0)
+                            log("peer unresponsive", "ignoring request");
+                        else {
+                            // send the id part of the message id
+                            if (send(socket_fd, &id, sizeof(id), 0) < 0)
+                                log("peer unresponsive", "ignoring request");
+                            else {
+                                // send the sequence number part of the message id
+                                if (send(socket_fd, &sequence_number, sizeof(sequence_number), 0) < 0)
+                                    log("peer unresponsive", "ignoring request");
+                                else {
+                                    char buffer[MAX_FILENAME_SIZE];
+                                    strcpy(buffer, filename.c_str());
+                                    // send the filename of the request
+                                    if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
+                                        log("peer unresponsive", "ignoring request");
+                                    else {
+                                        if (send(socket_fd, &version, sizeof(version), 0) < 0)
+                                            log("peer unresponsive", "ignoring request");
+                                        else {
+                                            if (!send_message_id(socket_fd, id, sequence_number))
+                                                log("peer unresponsive", "ignoring request");
+                                            else {
+                                                std::string msg = "msg id [" + std::to_string(id) +
+                                                                "," + std::to_string(sequence_number) +
+                                                                "] to peer " + std::to_string(peer);
+                                                log("forwarding message", msg);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                close(socket_fd);
+            }
+        }
+
         // helper function for sending the parts of a message id
         bool send_message_id(int socket_fd, int id, int sequence_number) {
             if (send(socket_fd, &id, sizeof(id), 0) < 0)
@@ -749,43 +826,14 @@ class SuperPeer {
         void check_peers() {
             while (1) {
                 sleep(_ttr);
+                std::lock_guard<std::mutex> guard(_modified_files_m);
                 for (auto&& x: _modified_files) {
                     if (_files_index.find(x.name) != _files_index.end())
                         compare_nodes(x.id, x.name, x.version);
-                    for (auto&& peer : _peers) {
-                        int socket_fd = connect_server(peer);
-                        if (socket_fd < 0) {
-                            log("failed peer connection", "ignoring connection");
-                            continue;
-                        }
-                        if (send(socket_fd, "0", sizeof(char), 0) < 0)
-                            log("peer unresponsive", "ignoring request");
-                        else {
-                            if (send(socket_fd, "3", sizeof(char), 0) < 0)
-                                log("peer unresponsive", "ignoring request");
-                            else {
-                                char buffer[MAX_FILENAME_SIZE];
-                                strcpy(buffer, x.name.c_str());
-                                // send the filename of the request
-                                if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
-                                    log("peer unresponsive", "ignoring request");
-                                else {
-                                    if (send(socket_fd, &x.id, sizeof(x.id), 0) < 0)
-                                        log("peer unresponsive", "ignoring request");
-                                    else {
-                                        if (send(socket_fd, &x.version, sizeof(x.version), 0) < 0)
-                                            log("peer unresponsive", "ignoring request");
-                                    }
-                                }
-                            }
-                        }
-                        close(socket_fd);
-                    }
+                    compare_peers(x.name, x.id, ++_sequence_number, _ttl, x.version);
                 }
-                std::lock_guard<std::mutex> guard(_modified_files_m);
                 _modified_files.clear();
             }
-
         }
 
     public:

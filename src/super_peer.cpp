@@ -19,7 +19,7 @@
 #define MAX_MSG_SIZE 4096
 
 
-enum CONSISTENCY_METHODS{PUSH, PULL_N, PULL_P};
+enum CONSISTENCY_METHODS{PUSH, PULL_N, PULL_P}; // cleaner comparisons for consistency method in use
 
 
 class SuperPeer {
@@ -30,11 +30,11 @@ class SuperPeer {
         std::unordered_map<std::string, std::vector<int>> _files_index; // mapping between a filename and any peers associated with it
 
         struct _file {
-            std::string name;
-            int id;
-            time_t version;
+            std::string name; // name of file modified
+            int id; // origin node fo modified file
+            time_t version; // version of the modified file
         };
-        std::vector<_file> _modified_files;
+        std::vector<_file> _modified_files; // vector of files modified from leaf nodes to check every ttr
         
         struct _message_id_hash {
             size_t operator()(const std::pair<int, int>& p) const { return p.first ^ p.second; }
@@ -101,15 +101,15 @@ class SuperPeer {
 
         // handle all requests sent to the peer
         void handle_connection(int socket_fd) {
-            char id;
-            //initialize connection by getting id
-            if (recv(socket_fd, &id, sizeof(id), 0) < 0) {
+            char request;
+            //initialize connection by getting request type
+            if (recv(socket_fd, &request, sizeof(request), 0) < 0) {
                 log("conn unidentified", "closing connection");
                 close(socket_fd);
                 return;
             }
 
-            switch (id) {
+            switch (request) {
                 case '0':
                     handle_peer_request(socket_fd);
                     break;
@@ -150,6 +150,7 @@ class SuperPeer {
             }
         }
 
+        // query local files index and broadcast message to neighbor peers
         void query(int socket_fd) {
             // get the ttl value of the sent message
             int ttl;
@@ -209,6 +210,7 @@ class SuperPeer {
             log("peer disconnected", "closed connection");
         }
 
+        // invalidate cached file and broadcast message to neighbor peers
         void invalidate(int socket_fd) {
             // get the ttl value of the sent message
             int ttl;
@@ -242,6 +244,7 @@ class SuperPeer {
                 return;
             }
 
+            // get the version number of the file
             time_t version;
             if (recv(socket_fd, &version, sizeof(version), 0) < 0) {
                 log("peer unresponsive", "ignoring request");
@@ -293,6 +296,7 @@ class SuperPeer {
                 return;
             }
 
+            // get the version number of the file
             time_t version;
             if (recv(socket_fd, &version, sizeof(version), 0) < 0) {
                 log("peer unresponsive", "ignoring request");
@@ -300,7 +304,9 @@ class SuperPeer {
                 return;
             }
 
+            // check if message id has been seen/forwarded already
             if (check_message_id(socket_fd)) {
+                // only compare file with current nodes if the file exists in the filex index
                 if (_files_index.find(buffer) != _files_index.end())
                     compare_nodes(id, buffer, version);
                 if (ttl-- > 0) {
@@ -311,10 +317,13 @@ class SuperPeer {
             log("peer disconnected", "closed connection");
         }
 
+        // compare a modified file from the origin server with cached versions in leaf nodes
         void compare_nodes(int id, std::string filename, time_t version) {
             for (auto&& node : _nodes) {
+                // ignore message for origin server
                 if (node == id)
                     continue;
+                // only send invalidate message if node has registered the file then super peer
                 if((std::find(_files_index[filename].begin(), _files_index[filename].end(), node) != _files_index[filename].end())) {
                     int socket_fd = connect_server(node);
                     if (socket_fd < 0) {
@@ -324,14 +333,17 @@ class SuperPeer {
                     if (send(socket_fd, "0", sizeof(char), 0) < 0)
                         log("node unresponsive", "ignoring request");
                     else {
+                        // send the origin node of the file
                         if (send(socket_fd, &id, sizeof(id), 0) < 0)
                             log("node unresponsive", "ignoring request");
                         else {
+                            // send the filname to check to invalidate
                             char buffer[MAX_FILENAME_SIZE];
                             strcpy(buffer, filename.c_str());
                             if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
                                 log("node unresponsive", "ignoring request");
                             else {
+                                // send the version number of the file
                                 if (send(socket_fd, &version, sizeof(version), 0) < 0)
                                     log("node unresponsive", "ignoring request");
                             }
@@ -432,19 +444,23 @@ class SuperPeer {
  
             remove_file_from_index(id, buffer);
             if (version != -1) {
+                // checks if either consistency method is used to invalidate cached files
                 if (_consistency_method == PUSH) {
                     invalidate_nodes(id, buffer, version);
                     invalidate_peers(id, buffer, version, ++_sequence_number, _ttl);
                 }
                 else if (_consistency_method == PULL_P) {
+                    // adds modified files to a temporary list to be dealt with when the TTR expires
                     std::lock_guard<std::mutex> guard(_modified_files_m);
                     _modified_files.push_back({buffer, id, version});
                 }
             }
         }
 
+        // sends an invalidation message to all nodes connected nodes
         void invalidate_nodes(int id, std::string filename, time_t version) {
             for (auto&& node : _nodes) {
+                // ignore origin node
                 if (node == id)
                     continue;
                 int socket_fd = connect_server(node);
@@ -455,14 +471,17 @@ class SuperPeer {
                 if (send(socket_fd, "0", sizeof(char), 0) < 0)
                     log("node unresponsive", "ignoring request");
                 else {
+                    // send origin node to node
                     if (send(socket_fd, &id, sizeof(id), 0) < 0)
                         log("node unresponsive", "ignoring request");
                     else {
+                        // send filename
                         char buffer[MAX_FILENAME_SIZE];
                         strcpy(buffer, filename.c_str());
                         if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
                             log("node unresponsive", "ignoring request");
                         else {
+                            // send version to node
                             if (send(socket_fd, &version, sizeof(version), 0) < 0)
                                 log("node unresponsive", "ignoring request");
                         }
@@ -472,6 +491,7 @@ class SuperPeer {
             }
         }
 
+        // broadcast invalidation message to all neighbor peers
         void invalidate_peers(int id, std::string filename, time_t version, int sequence_number, int ttl) {
             // iteratively query each peer to search their files index
             for (auto&& peer : _peers) {
@@ -483,7 +503,6 @@ class SuperPeer {
                 if (send(socket_fd, "0", sizeof(char), 0) < 0)
                     log("peer unresponsive", "ignoring request");
                 else {
-                    // send ttl value of current message
                     if (send(socket_fd, "2", sizeof(char), 0) < 0)
                         log("peer unresponsive", "ignoring request");
                     else {
@@ -505,6 +524,7 @@ class SuperPeer {
                                     if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
                                         log("peer unresponsive", "ignoring request");
                                     else {
+                                        // send the version of the file of the request
                                         time_t version;
                                         if (send(socket_fd, &version, sizeof(version), 0) < 0)
                                             log("peer unresponsive", "ignoring request");
@@ -620,6 +640,7 @@ class SuperPeer {
             return ids;
         }
 
+        // broadcast comparison message to all neighbor peers
         void compare_peers(std::string filename, int id, int sequence_number, int ttl, time_t version) {
             for (auto&& peer : _peers) {
                 int socket_fd = connect_server(peer);
@@ -630,7 +651,6 @@ class SuperPeer {
                 if (send(socket_fd, "0", sizeof(char), 0) < 0)
                     log("peer unresponsive", "ignoring request");
                 else {
-                    // send ttl value of current message
                     if (send(socket_fd, "3", sizeof(char), 0) < 0)
                         log("peer unresponsive", "ignoring request");
                     else {
@@ -652,6 +672,7 @@ class SuperPeer {
                                     if (send(socket_fd, buffer, sizeof(buffer), 0) < 0)
                                         log("peer unresponsive", "ignoring request");
                                     else {
+                                        // send version of the file of the request
                                         if (send(socket_fd, &version, sizeof(version), 0) < 0)
                                             log("peer unresponsive", "ignoring request");
                                         else {
@@ -767,6 +788,7 @@ class SuperPeer {
             std::cout << "_______________________________\n" << std::endl;
         }
 
+        // helper function for displaying all tracked modified files
         void print_modified_files_list() {
             std::cout << "\n__________MODIFIED FILES__________" << std::endl;
             std::cout << "[filename] [origin node] [version]" << std::endl;
@@ -823,15 +845,18 @@ class SuperPeer {
             }
         }
 
+        // thread for comparing any modified files to local leaf nodes and neighbor super peers
         void check_peers() {
             while (1) {
                 sleep(_ttr);
                 std::lock_guard<std::mutex> guard(_modified_files_m);
                 for (auto&& x: _modified_files) {
+                    // only compare files with local nodes if the file exists in the mapping
                     if (_files_index.find(x.name) != _files_index.end())
                         compare_nodes(x.id, x.name, x.version);
                     compare_peers(x.name, x.id, ++_sequence_number, _ttl, x.version);
                 }
+                // clear the modified files after any cached versions have been invalidated across the network
                 _modified_files.clear();
             }
         }
@@ -891,6 +916,7 @@ class SuperPeer {
             std::thread m_t(&SuperPeer::maintain_message_ids, this);
             m_t.detach();
 
+            // start thread for maintaining modified files list if using the PULL FROM PEERS consistency method
             if (_consistency_method == PULL_P) {
                 std::thread f_t(&SuperPeer::check_peers, this);
                 f_t.detach();

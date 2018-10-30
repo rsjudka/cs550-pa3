@@ -26,10 +26,6 @@
 
 enum CONSISTENCY_METHODS{PUSH, PULL_N, PULL_P}; // cleaner comparisons for consistency method in use
 
-//global counters used only for logging special messages used for later anlaysis
-int SRCH_REQ_COUNTER = 0;
-int OBTN_REQ_COUNTER = 0;
-
 
 class LeafNode {
     private:
@@ -64,9 +60,9 @@ class LeafNode {
         }
 
         //special log messages used for later analysis
-        void eval_log(std::ofstream &log_stream, int key, std::string type, std::string msg) {
+        void eval_log(std::ofstream &log_stream, std::string type, std::string msg) {
             std::lock_guard<std::mutex> guard(_log_m);
-            log_stream << '!' << key << " [" << time_now() << "] [" << type << "] [" << msg  << "]\n" << std::endl;
+            log_stream << '!' << " [" << type << "] [" << msg  << "]\n" << std::endl;
         }
         
         void error(std::string type) {
@@ -127,6 +123,7 @@ class LeafNode {
                             remove(filename_path.c_str());
                             std::string msg = "remote file \"" + it->local_name + "\" modified";
                             log(_client_log, "removing file", msg);
+                            eval_log(_client_log, "RMV", std::to_string(it->origin_node) + '/' + it->origin_name);
                         }
                     }
                 }
@@ -456,6 +453,7 @@ class LeafNode {
                 remove(filename_path.c_str());
                 std::string msg = "remote file \"" + remote_file.local_name + "\" modified";
                 log(_client_log, "removing file", msg);
+                eval_log(_client_log, "RMV", std::to_string(remote_file.origin_node) + '/' + remote_file.origin_name);
 
             }
             if (send(socket_fd, "1", sizeof(char), 0) < 0)
@@ -484,6 +482,7 @@ class LeafNode {
                                     remove(filename_path.c_str());
                                     std::string msg = "remote file \"" + remote_file.local_name + "\" modified";
                                     log(_client_log, "removing file", msg);
+                                    eval_log(_client_log, "RMV", std::to_string(remote_file.origin_node) + '/' + remote_file.origin_name);
                                 }
                             }
                         }
@@ -498,7 +497,6 @@ class LeafNode {
             std::cout << "filename: ";
             char filename[MAX_FILENAME_SIZE];
             std::cin >> filename;
-            eval_log(_client_log, SRCH_REQ_COUNTER, "search request", "start");
             // send a search request to the peer
             if (send(socket_fd, "3", sizeof(char), 0) < 0) {
                 std::cout << "\nunexpected connection issue: no search performed\n" << std::endl;
@@ -518,13 +516,16 @@ class LeafNode {
                         std::cout << "\nunexpected connection issue: no search performed\n" << std::endl;
                         log(_client_log, "server unresponsive", "ignoring request");
                     }
-                    else if (!buffer[0])
+                    else if (!buffer[0]) {
                         std::cout << "\nfile \"" << filename << "\" not found\n" << std::endl;
-                    else
+                        eval_log(_client_log, "SRCH", "FAIL");
+                    }
+                    else {
                         std::cout << "\nnode(s) with file \"" << filename << "\": " << buffer << '\n' << std::endl;
+                        eval_log(_client_log, "SRCH", std::string(filename) + "] [" + std::string(buffer));
+                    }
                 }
             }
-            eval_log(_client_log, SRCH_REQ_COUNTER++, "search request", "end");
         }
 
         //helper function for creating the filename of a downloaded file
@@ -549,7 +550,6 @@ class LeafNode {
             std::cout << "node: ";
             char node[6];
             std::cin >> node;
-            eval_log(_client_log, OBTN_REQ_COUNTER, "retrieve request", "start");
             // check if the passed-in node is the current client
             if (atoi(node) == _port) {
                 std::cout << "\nnode '" << node << "' is current client: no retreival performed\n" << std::endl;
@@ -573,11 +573,9 @@ class LeafNode {
                     log(_client_log, "node unresponsive", "ignoring request");
                 }
                 else {
-                    eval_log(_client_log, OBTN_REQ_COUNTER, "retrieve request", "pause");
                     std::cout << "filename: ";
                     char filename[MAX_FILENAME_SIZE];
                     std::cin >> filename;
-                    eval_log(_client_log, OBTN_REQ_COUNTER, "retrieve request", "unpause");
                     if (send(socket_fd, filename, sizeof(filename), 0) < 0) {
                         std::cout << "\nunexpected connection issue: no retreival performed\n" << std::endl;
                         log(_client_log, "node unresponsive", "ignoring request");
@@ -628,6 +626,7 @@ class LeafNode {
                                             std::cout << "\nunable to create new file \"" << local_filename
                                                     << "\": no retreival performed\n" << std::endl;
                                             log(_client_log, "failed file open", "ignoring file");
+                                            eval_log(_client_log, "OBTN", "FAIL");
                                         }
                                         else {
                                             char buffer_[MAX_MSG_SIZE];
@@ -656,6 +655,7 @@ class LeafNode {
                                                 std::cout << "\nfile \"" << local_filename << "\" updated to version "
                                                         << version << "\n" << std::endl;
                                             }
+                                            eval_log(_client_log, "OBTN", std::string(node) + '/' + std::string(filename));
                                             std::cout << "\ndislpay file '" << local_filename << "'\n. . .\n" << std::endl;
                                             log(_client_log, "file download", "file download successful");
                                         }
@@ -666,7 +666,6 @@ class LeafNode {
                     }
                 }
             }
-            eval_log(_client_log, OBTN_REQ_COUNTER++, "retrieve request", "end");
             close(socket_fd);
         }
 

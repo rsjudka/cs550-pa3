@@ -1,0 +1,3 @@
+current node id: 55012
+
+request [(s)earch|(o)btain|(r)efresh|(q)uit]:

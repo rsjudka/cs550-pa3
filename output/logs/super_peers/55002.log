@@ -1,0 +1,48 @@
+[1540944645340485] [conn established] 127.0.0.1@50274
+
+[1540944848221855] [conn established] 127.0.0.1@50444
+
+[1540944848223436] [forwarding message] msg id [55010,1] to peer 55000
+
+[1540944848224534] [forwarding message] msg id [55010,1] to peer 55001
+
+[1540944848225381] [peer disconnected] closed connection
+
+[1540944848225879] [conn established] 127.0.0.1@50450
+
+[1540944848226323] [message already seen] rerouting message back to sender
+
+[1540944848226559] [peer disconnected] closed connection
+
+[1540945160676254] [forwarding message] msg id [55013,1] to peer 55000
+
+[1540945160677069] [forwarding message] msg id [55013,1] to peer 55001
+
+[1540945160678211] [conn established] 127.0.0.1@50600
+
+[1540945160679063] [conn established] 127.0.0.1@50602
+
+[1540945160679367] [message already seen] rerouting message back to sender
+
+[1540945160679783] [peer disconnected] closed connection
+
+[1540945160679968] [message already seen] rerouting message back to sender
+
+[1540945160680210] [peer disconnected] closed connection
+
+[1540945475892039] [forwarding message] msg id [55013,2] to peer 55000
+
+[1540945475892736] [forwarding message] msg id [55013,2] to peer 55001
+
+[1540945475894368] [conn established] 127.0.0.1@50738
+
+[1540945475894728] [conn established] 127.0.0.1@50740
+
+[1540945475895059] [message already seen] rerouting message back to sender
+
+[1540945475895280] [message already seen] rerouting message back to sender
+
+[1540945475895522] [peer disconnected] closed connection
+
+[1540945475895722] [peer disconnected] closed connection
+

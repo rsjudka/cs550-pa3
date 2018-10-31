@@ -1,0 +1,47 @@
+starting indexing server on port 55000
+
+[1540944636150639] [conn established] [127.0.0.1@49858]
+
+[1540944848219213] [forwarding message] [msg id [55010,1] to peer 55001]
+
+[1540944848220652] [conn established] [127.0.0.1@50038]
+
+[1540944848221308] [message already seen] [rerouting message back to sender]
+
+[1540944848221608] [peer disconnected] [closed connection]
+
+[1540944848223602] [conn established] [127.0.0.1@50042]
+
+[1540944848223994] [message already seen] [rerouting message back to sender]
+
+[1540944848224414] [peer disconnected] [closed connection]
+
+[1540944848226175] [forwarding message] [msg id [55010,1] to peer 55002]
+
+[1540945160676516] [conn established] [127.0.0.1@50182]
+
+[1540945160677870] [forwarding message] [msg id [55013,1] to peer 55001]
+
+[1540945160678627] [conn established] [127.0.0.1@50194]
+
+[1540945160679104] [forwarding message] [msg id [55013,1] to peer 55002]
+
+[1540945160679501] [peer disconnected] [closed connection]
+
+[1540945160679697] [message already seen] [rerouting message back to sender]
+
+[1540945160679944] [peer disconnected] [closed connection]
+
+[1540945475892356] [conn established] [127.0.0.1@50320]
+
+[1540945475893927] [forwarding message] [msg id [55013,2] to peer 55001]
+
+[1540945475894315] [conn established] [127.0.0.1@50332]
+
+[1540945475894667] [message already seen] [rerouting message back to sender]
+
+[1540945475894996] [forwarding message] [msg id [55013,2] to peer 55002]
+
+[1540945475895269] [peer disconnected] [closed connection]
+
+[1540945475895522] [peer disconnected] [closed connection]

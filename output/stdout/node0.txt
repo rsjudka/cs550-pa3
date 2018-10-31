@@ -1,0 +1,38 @@
+current node id: 55010
+
+request [(s)earch|(o)btain|(r)efresh|(q)uit]: s
+filename: j.txt
+
+node(s) with file "j.txt": 55010,55011,55012,55013
+
+request [(s)earch|(o)btain|(r)efresh|(q)uit]: o
+node: 55013
+filename: j.txt
+
+file "j.txt" downloaded as "j.txt"
+
+
+dislpay file 'j.txt'
+. . .
+
+request [(s)earch|(o)btain|(r)efresh|(q)uit]: o
+node: 55013
+filename: a1.txt
+
+file "a1.txt" downloaded as "a1.txt"
+
+
+dislpay file 'a1.txt'
+. . .
+
+request [(s)earch|(o)btain|(r)efresh|(q)uit]: r
+node: 55013
+filename: a1.txt
+
+file "a1.txt" updated to version 1540944415
+
+
+dislpay file 'a1.txt'
+. . .
+
+request [(s)earch|(o)btain|(r)efresh|(q)uit]:
